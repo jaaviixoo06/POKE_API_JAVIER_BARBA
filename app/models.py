@@ -122,3 +122,11 @@ class TeamMember(SQLModel, table=True):
     # Relaciones
     team: Team = Relationship(back_populates="members")
     pokedex_entry: PokedexEntry = Relationship(back_populates="team_members")
+
+
+class TeamUpdate(SQLModel):
+    # Usamos SQLModel (no TeamCreate) y todos los campos son Optional
+    name: Optional[str] = Field(default=None, max_length=100)
+    description: Optional[str] = None
+    # Esto es el payload de los IDs a actualizar, NO una relación SQLModel
+    pokemon_ids: Optional[List[int]] = None
