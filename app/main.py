@@ -1,4 +1,4 @@
-# app/main.py - CÓDIGO CONSOLIDADO COMPLETO
+# app/main.py - CÓDIGO CONSOLIDADO COMPLETO Y PARTE 2.5 READY
 
 import logging
 from contextlib import asynccontextmanager
@@ -8,86 +8,98 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.database import create_db_and_tables
-from app.routers.auth import auth_router 
-from app.routers.pokemon import pokemon_router 
+from app.routers.auth import auth_router
+from app.routers.pokemon import pokemon_router
 from app.routers.pokedex import pokedex_router
 from app.routers.teams import teams_router
+from datetime import datetime
 
-
-# Configuración del Logger (Opcional, pero bueno para depuración)
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(name)s %(levelname)s %(message)s',
+    handlers=[
+        logging.FileHandler('pokedex_api.log'),logging.StreamHandler()]) # Log a consola # Log a archivo [cite: 309]
+logger = logging.getLogger("pokedex_api")  # ⬅️ Usar nombre del logger global
 
 # --- CONFIGURACIÓN DE RATE LIMITING (SLOWAPI) ---
 limiter = Limiter(key_func=get_remote_address)
 
 
-# --- LIFESPAN CONTEXT MANAGER (Manejo de Ciclo de Vida) ---
+# --- LIFESPAN CONTEXT MANAGER ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Función que se ejecuta al inicio y fin de la aplicación.
-    Inicializa la base de datos al arrancar.
-    """
     logger.info("Starting up...")
     create_db_and_tables()
     logger.info("Database initialized.")
-    yield # Aquí se ejecuta la aplicación
+    yield
     logger.info("Shutting down...")
 
 
 # --- INICIALIZACIÓN DE LA APP (Instancia FastAPI) ---
-# Se pasa el lifespan a la instancia 'app'
 app = FastAPI(
     title="Pokédex Personal API",
     version="v1.0.0",
     description="API REST para la gestión de Pokédex y Equipos de Batalla.",
-    lifespan=lifespan 
+    lifespan=lifespan
 )
 
 # Manejador de errores para Rate Limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-
-# --- MIDDLEWARE DE CORS (Parte 2.1) ---
-# Ajustar en entorno productivo
+# --- MIDDLEWARE DE CORS (Parte 2.4 - Configuración Requerida) ---
+# Orígenes permitidos [cite: 265-269]
 origins = [
-    "http://localhost:8080",  # Frontend local (ejemplo)
-    "http://127.0.0.1:8000"
+    "http://localhost:3000",  # React dev
+    "http://localhost:5173",  # Vite dev
+    "https://tu-dominio.com"  # Producción
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],  # ⬅️ Métodos especificados [cite: 271]
+    allow_headers=["Authorization", "Content-Type"],  # ⬅️ Headers especificados [cite: 272]
+    max_age=3600,
 )
 
-# --- MIDDLEWARE DE TOKEN/SESIÓN (Parte 2.1, si se implementó) ---
+
+# --- MIDDLEWARE DE LOGGING (Ejemplo de Middleware de Logging - Parte 2.6) ---
 @app.middleware("http")
-async def token_check_middleware(request: Request, call_next):
-    """Middleware para verificar el token en cabeceras de respuesta (si aplica)."""
-    # Lógica de verificación o manejo de sesión (opcional, pero útil para la práctica)
+async def log_requests(request: Request, call_next):
+    """Registra todas las peticiones HTTP entrantes y salientes."""
+
+    start_time = datetime.utcnow()
+
+    # Logs requeridos: Peticiones HTTP (método, path)
+    logger.info(f"Request: {request.method} {request.url.path}")
+
     response = await call_next(request)
-    # Ejemplo de acción post-request:
-    # if response.status_code == status.HTTP_200_OK:
-    #     fastapi_session_token_check(request, response)
+
+    duration = (datetime.utcnow() - start_time).total_seconds()
+
+    # Logs requeridos: Respuesta HTTP (status, duración)
+    logger.info(  f"Response: {response.status_code} |" f"Duration: {duration:.3f}s")
+
     return response
 
 
-# --- CONFIGURACIÓN DE RUTAS Y VERSIONADO (Parte 2.3) ---
+# --- CONFIGURACIÓN DE RUTAS Y VERSIONADO (Parte 2.7) ---
 
 v1_router = APIRouter(prefix="/api/v1")
 
-# ⬅️ IMPORTANTE: Incluir la instancia del APIRouter sin paréntesis.
-v1_router.include_router(auth_router, tags=["Authentication"]) 
-v1_router.include_router(pokemon_router, tags=["Pokemon Search (Proxy)"]) 
+# Versión 2 Router
+v2_router = APIRouter(prefix="/api/v2")
+
+v1_router.include_router(auth_router, tags=["Authentication"])
+v1_router.include_router(pokemon_router, tags=["Pokemon Search (Proxy)"])
 v1_router.include_router(pokedex_router, tags=["Pokédex Personal (CRUD)"])
 v1_router.include_router(teams_router, tags=["Equipos de Batalla"])
 
 app.include_router(v1_router)
+app.include_router(v2_router) # La v2 no tiene rutas funcionales aún, pero su estructura está lista.
+
 
 # --- RUTA DE SALUD (OPCIONAL) ---
 @app.get("/")

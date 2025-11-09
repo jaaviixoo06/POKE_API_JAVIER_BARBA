@@ -1,63 +1,65 @@
-# app/auth.py
-
+# app/auth.py - USANDO ARGON2 (RECOMENDADO)
 from passlib.context import CryptContext
-from fastapi import HTTPException, status
-from jose import JWTError, jwt
+from fastapi import HTTPException
+from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict
+from typing import Any, Optional
+import os
 
-from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
 
-#Contexto para hashing y verificación de contraseñas (bcrypt) [cite: 37, 156]
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# --- Configuración ---
+SECRET_KEY = os.environ.get("SECRET_KEY", "CLAVE_DEFAULT_NO_SEGURA")
+ALGORITHM = "HS256"
 
+# Usamos Argon2: moderno y sin límite de 72 bytes.
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
-#--- Utilidades de Seguridad ---
 
 def hash_password(password: str) -> str:
-    """Hashea una contraseña para almacenamiento seguro ."""
-    # Contraseñas hasheadas (NUNCA en texto plano) [cite: 165]
+    """
+    Hashea una contraseña usando Argon2 y devuelve el hash.
+    """
+    if password is None:
+        raise ValueError("La contraseña no puede ser None")
     return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifica una contraseña plana contra su hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """
+    Verifica la contraseña usando Argon2.
+    """
+    if plain_password is None:
+        return False
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
 
 
-# --- Utilidades JWT ---
-
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """Crea un token JWT con claims: sub (username), user_id, exp, iat ."""
+# --------------------------------------------------------------------------
+# JWT helpers (igual que antes)
+# --------------------------------------------------------------------------
+def create_access_token(data: dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-
+    now = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = now + expires_delta
     else:
-        # Token válido por 24 horas
-        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    #Claims obligatorios
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
-
+    to_encode.update({"exp": expire, "iat": now})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
 
-def verify_token(token: str, credentials_exception: HTTPException) -> Dict:
-    """Valida el token JWT, retorna el payload o lanza la excepción."""
+def verify_token(token: str, credentials_exception: HTTPException) -> dict[str, Any]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-
-        #Validación de claims
-        username: str = payload.get("sub")
-        user_id: int = payload.get("user_id")
-
+        username: Optional[str] = payload.get("sub")
+        user_id = payload.get("user_id")
         if username is None or user_id is None:
             raise credentials_exception
-
-        return {"sub": username, "user_id": user_id}
-
+        return payload
     except JWTError:
-        #Si el token es inválido, ha expirado, o la firma no coincide
         raise credentials_exception

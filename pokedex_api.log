@@ -1,0 +1,105 @@
+2025-11-09 19:25:58,933 pokedex_api INFO Starting up...
+2025-11-09 19:25:58,934 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:25:58,935 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("user")
+2025-11-09 19:25:58,935 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:25:58,935 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("pokedexentry")
+2025-11-09 19:25:58,936 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:25:58,936 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("team")
+2025-11-09 19:25:58,936 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:25:58,936 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("teammember")
+2025-11-09 19:25:58,940 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:25:58,941 sqlalchemy.engine.Engine INFO COMMIT
+2025-11-09 19:25:58,941 pokedex_api INFO Database initialized.
+2025-11-09 19:26:54,799 pokedex_api INFO Shutting down...
+2025-11-09 19:26:56,426 pokedex_api INFO Starting up...
+2025-11-09 19:26:56,427 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:26:56,428 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("user")
+2025-11-09 19:26:56,428 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:26:56,429 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("pokedexentry")
+2025-11-09 19:26:56,430 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:26:56,430 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("team")
+2025-11-09 19:26:56,431 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:26:56,431 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("teammember")
+2025-11-09 19:26:56,432 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:26:56,432 sqlalchemy.engine.Engine INFO COMMIT
+2025-11-09 19:26:56,433 pokedex_api INFO Database initialized.
+2025-11-09 19:28:20,064 pokedex_api INFO Shutting down...
+2025-11-09 19:28:21,735 pokedex_api INFO Starting up...
+2025-11-09 19:28:21,736 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:28:21,737 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("user")
+2025-11-09 19:28:21,737 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:28:21,738 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("pokedexentry")
+2025-11-09 19:28:21,738 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:28:21,739 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("team")
+2025-11-09 19:28:21,739 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:28:21,740 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("teammember")
+2025-11-09 19:28:21,740 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:28:21,740 sqlalchemy.engine.Engine INFO COMMIT
+2025-11-09 19:28:21,741 pokedex_api INFO Database initialized.
+2025-11-09 19:30:35,363 pokedex_api INFO Shutting down...
+2025-11-09 19:30:37,826 pokedex_api INFO Starting up...
+2025-11-09 19:30:37,827 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:30:37,828 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("user")
+2025-11-09 19:30:37,828 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:30:37,828 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("pokedexentry")
+2025-11-09 19:30:37,829 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:30:37,829 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("team")
+2025-11-09 19:30:37,829 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:30:37,829 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("teammember")
+2025-11-09 19:30:37,829 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:30:37,830 sqlalchemy.engine.Engine INFO COMMIT
+2025-11-09 19:30:37,830 pokedex_api INFO Database initialized.
+2025-11-09 19:30:44,892 pokedex_api INFO Request: GET /docs
+2025-11-09 19:30:44,893 pokedex_api INFO Response: 200 |Duration: 0.001s
+2025-11-09 19:30:44,992 pokedex_api INFO Request: GET /openapi.json
+2025-11-09 19:30:45,027 pokedex_api INFO Response: 200 |Duration: 0.035s
+2025-11-09 19:31:06,555 pokedex_api INFO Request: POST /api/v1/auth/login
+2025-11-09 19:31:06,560 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:31:06,572 sqlalchemy.engine.Engine INFO SELECT user.id, user.username, user.email, user.hashed_password, user.created_at, user.is_active 
+FROM user 
+WHERE user.username = ?
+2025-11-09 19:31:06,572 sqlalchemy.engine.Engine INFO [generated in 0.00064s] ('Javier_Barba',)
+2025-11-09 19:31:06,631 pokedex_api INFO Response: 200 |Duration: 0.076s
+2025-11-09 19:31:06,633 sqlalchemy.engine.Engine INFO ROLLBACK
+2025-11-09 19:31:16,371 pokedex_api INFO Request: GET /api/v1/pokemon/4/card
+2025-11-09 19:31:16,374 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:31:16,374 sqlalchemy.engine.Engine INFO SELECT user.id, user.username, user.email, user.hashed_password, user.created_at, user.is_active 
+FROM user 
+WHERE user.id = ?
+2025-11-09 19:31:16,375 sqlalchemy.engine.Engine INFO [generated in 0.00042s] (1,)
+2025-11-09 19:31:16,376 pokedex_api.pokeapi INFO Llamada externa a PokeAPI: GET https://pokeapi.co/api/v2/pokemon/4
+2025-11-09 19:31:16,448 httpx INFO HTTP Request: GET https://pokeapi.co/api/v2/pokemon/4 "HTTP/1.1 200 OK"
+2025-11-09 19:31:16,451 pokedex_api.pokeapi INFO Respuesta de PokeAPI: 200 | GET /pokemon/4 | Duración: 0.074s
+2025-11-09 19:31:16,465 pokedex_api INFO Response: 200 |Duration: 0.094s
+2025-11-09 19:31:16,467 sqlalchemy.engine.Engine INFO ROLLBACK
+2025-11-09 19:31:21,510 pokedex_api INFO Request: GET /api/v1/pokemon/4/card
+2025-11-09 19:31:21,511 pokedex_api INFO Response: 401 |Duration: 0.001s
+2025-11-09 19:31:23,839 pokedex_api INFO Request: GET /api/v1/pokemon/4/card
+2025-11-09 19:31:23,841 pokedex_api INFO Response: 401 |Duration: 0.001s
+2025-11-09 19:35:26,890 pokedex_api INFO Shutting down...
+2025-11-09 19:35:28,669 pokedex_api INFO Starting up...
+2025-11-09 19:35:28,671 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:35:28,671 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("user")
+2025-11-09 19:35:28,671 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:28,672 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("pokedexentry")
+2025-11-09 19:35:28,673 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:28,673 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("team")
+2025-11-09 19:35:28,673 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:28,674 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("teammember")
+2025-11-09 19:35:28,674 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:28,674 sqlalchemy.engine.Engine INFO COMMIT
+2025-11-09 19:35:28,675 pokedex_api INFO Database initialized.
+2025-11-09 19:35:57,559 pokedex_api INFO Shutting down...
+2025-11-09 19:35:59,267 pokedex_api INFO Starting up...
+2025-11-09 19:35:59,269 sqlalchemy.engine.Engine INFO BEGIN (implicit)
+2025-11-09 19:35:59,269 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("user")
+2025-11-09 19:35:59,270 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:59,271 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("pokedexentry")
+2025-11-09 19:35:59,271 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:59,272 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("team")
+2025-11-09 19:35:59,272 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:59,273 sqlalchemy.engine.Engine INFO PRAGMA main.table_info("teammember")
+2025-11-09 19:35:59,274 sqlalchemy.engine.Engine INFO [raw sql] ()
+2025-11-09 19:35:59,274 sqlalchemy.engine.Engine INFO COMMIT
+2025-11-09 19:35:59,275 pokedex_api INFO Database initialized.
+2025-11-09 19:37:11,951 pokedex_api INFO Shutting down...

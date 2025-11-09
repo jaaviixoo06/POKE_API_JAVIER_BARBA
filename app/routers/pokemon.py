@@ -185,6 +185,7 @@ async def generate_pokemon_card(
 @pokemon_router.get("/{id_or_name}")
 async def get_pokemon_details(
         id_or_name: str,
+
         current_user: User = Depends(get_current_active_user)
 ):
     """Obtiene detalles completos de un Pokémon (stats, abilities, types, sprites)."""
