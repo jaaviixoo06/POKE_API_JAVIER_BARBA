@@ -1,65 +1,124 @@
-# app/auth.py - USANDO ARGON2 (RECOMENDADO)
-from passlib.context import CryptContext
-from fastapi import HTTPException
-from jose import jwt, JWTError
+import re
+import hashlib
+from typing import Optional
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
-import os
+from fastapi.security import HTTPBearer
+from passlib.context import CryptContext
+from fastapi import HTTPException, Depends, status
+from jose import jwt, JWTError, ExpiredSignatureError
+from sqlmodel import Session, select
+from app.config import settings
+from app.database import get_session
+from app.models import User
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
-from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
+limiter = Limiter(key_func=get_remote_address)
 
-# --- Configuración ---
-SECRET_KEY = os.environ.get("SECRET_KEY", "CLAVE_DEFAULT_NO_SEGURA")
-ALGORITHM = "HS256"
+#Contexto de hashing
+pwd_context = CryptContext(schemes=["bcrypt", "sha256_crypt"],deprecated="auto")
 
-# Usamos Argon2: moderno y sin límite de 72 bytes.
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-
-
-def hash_password(password: str) -> str:
-    """
-    Hashea una contraseña usando Argon2 y devuelve el hash.
-    """
+#Helpers de hashing (solución al límite de 72 bytes)
+def _sha256_hexdigest(password: Optional[str]) -> str:
+    """Convierte la contraseña a un digest SHA-256 (64 caracteres ASCII)."""
     if password is None:
-        raise ValueError("La contraseña no puede ser None")
-    return pwd_context.hash(password)
+        return ""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def get_password_hashed(password: str) -> str:
     """
-    Verifica la contraseña usando Argon2.
+    Pre-hashea con SHA-256 y luego aplica sha256_crypt.
+    Evita el error de bcrypt por contraseñas >72 bytes.
     """
-    if plain_password is None:
+    digest = _sha256_hexdigest(password)
+    return pwd_context.hash(digest, scheme="sha256_crypt")
+
+
+def verify_password(plain_password: Optional[str], hashed_password: str) -> bool:
+    """
+    Verifica la contraseña comparando primero el digest SHA-256
+    y luego (por compatibilidad) la contraseña original si falla.
+    """
+    if not plain_password or not hashed_password:
         return False
+
+    digest = _sha256_hexdigest(plain_password)
+
+    #Intentar con digest pre-hasheado
+    try:
+        if pwd_context.verify(digest, hashed_password):
+            return True
+    except ValueError:
+        pass
+    except Exception:
+    #Evita el warning "Too broad exception clause" sin dejarlo abierto
+        return False
+
+    #Fallback (para hashes antiguos)
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception:
         return False
 
+#JWT helpers (igual que antes)
+security = HTTPBearer()
 
-# --------------------------------------------------------------------------
-# JWT helpers (igual que antes)
-# --------------------------------------------------------------------------
-def create_access_token(data: dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
+def create_token(payload: dict, minutes: float) -> str:
     now = datetime.now(timezone.utc)
-    if expires_delta:
-        expire = now + expires_delta
-    else:
-        expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = now + timedelta(minutes=minutes)
+    to_encode = payload.copy()
+    to_encode.update({"iat": now,"exp": expire, })
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
-    to_encode.update({"exp": expire, "iat": now})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+def create_access_token(username: str, user_id: int) -> str:
+    return create_token({"sub": username, "user_id": user_id}, settings.access_token_expire_minutes)
+
+def create_refresh_token(username: str, user_id: int) -> str:
+    return create_token({"sub": username, "user_id": user_id, "type": "refresh"}, settings.refresh_token_expire_minutes)
+
+def get_user_by_username(session: Session, username: str) -> Optional[User]:
+    return session.exec(select(User).where(User.username == username)).first()
 
 
-def verify_token(token: str, credentials_exception: HTTPException) -> dict[str, Any]:
+async def get_current_user(credentials = Depends(security), session: Session = Depends(get_session)) -> User:
+    """
+    Dependencia que valida:
+      - Authorization header con Bearer token
+      - Token JWT válido
+      - Usuario existe en DB
+    """
+    cred_exc = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    if not credentials or not getattr(credentials, "credentials", None):
+        raise HTTPException( status_code=status.HTTP_401_UNAUTHORIZED,detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    token = credentials.credentials
+
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: Optional[str] = payload.get("sub")
-        user_id = payload.get("user_id")
-        if username is None or user_id is None:
-            raise credentials_exception
-        return payload
+        payload = jwt.decode( token,settings.secret_key, algorithms=[settings.algorithm],
+            options={"require_sub": True, "require_iat": True, "verify_aud": False},
+        )
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired", headers={"WWW-Authenticate": "Bearer"})
     except JWTError:
-        raise credentials_exception
+        raise cred_exc
+
+    username = payload.get("sub")
+    if not username:
+        raise cred_exc
+
+    user = get_user_by_username(session, username)
+    if not user:
+        raise cred_exc
+
+    return user
+
+
+#Placeholders
+EMAIL_RE = re.compile("!pnMk+£I6jT0uE+i21`l'9hsGQ_R")
+PASSWORD_RE = re.compile("1j(%817Tr)Mi[9w1Q+]")
