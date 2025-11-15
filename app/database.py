@@ -1,20 +1,18 @@
-# app/database.py - GESTIÓN DE LA BASE DE DATOS
+#app/database.py
 
 from sqlmodel import create_engine, Session, SQLModel
 from typing import Generator
-import os
 
-# Nombre de la base de datos SQLite (se creará en la raíz del proyecto)
+
+#Nombre de la base de datos SQLite (se crea en la raíz del proyecto)
 sqlite_file_name = "database.db"
-# URL de conexión, usando la ruta relativa del archivo
+
+#URL de conexión, usando la ruta relativa del archivo
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 
 # Configuración del motor de la base de datos
 # El 'connect_args' es necesario para que SQLite funcione con múltiples hilos de FastAPI
 engine = create_engine(sqlite_url, echo=True, connect_args={"check_same_thread": False})
-
-
-# --- FUNCIONES CLAVE ---
 
 def create_db_and_tables():
     """
@@ -32,6 +30,3 @@ def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
 
-# NOTA: En este punto, SQLModel asume que ya has importado tus modelos 
-# (User, PokedexEntry, Team) en algún lugar, generalmente en app/models.py,
-# para que SQLModel.metadata.create_all(engine) pueda encontrarlos.
