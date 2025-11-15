@@ -1,18 +1,52 @@
-# app/utils.py - CÓDIGO FINAL
+# app/utils.py - CÓDIGO FINAL CONSOLIDADO
 
 from fastapi import HTTPException, status
 import re
-from typing import Optional
+from passlib.context import CryptContext
+
+
+# --- CONFIGURACIÓN DE HASHING ---
+# Contexto para hashing y verificación de contraseñas (Solución de estabilidad)
+#schemes=["bcrypt_sha256"]
+pwd_context = CryptContext(
+    schemes=["bcrypt_sha256", "bcrypt", "sha256_crypt"],
+    deprecated="auto"
+)
+
+
+# --------------------------------------------------------------------------
+# --- 1. Lógica de Validación (Parte 2.2) ---
+# --------------------------------------------------------------------------
 
 def validate_password_policy(password: str):
-    """Valida la política de contraseña: min 8 caracteres, 1 mayúscula, 1 número."""
-    # 1. Mínimo 8 caracteres
+    """
+    Valida que la contraseña cumpla:
+    - Mínimo una mayúscula
+    - Mínimo un número
+    - Mínimo un carácter especial
+    - Mínimo 8 caracteres (opcional pero recomendado)
+    """
+
     if len(password) < 8:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe tener al menos 8 caracteres.")
-    # 2. Mínimo 1 mayúscula
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe tener al menos 8 caracteres."
+        )
+
     if not re.search(r"[A-Z]", password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe contener al menos 1 letra mayúscula.")
-    # 3. Mínimo 1 número
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe contener al menos una letra mayúscula."
+        )
+
     if not re.search(r"\d", password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe contener al menos 1 número.")
-    return True
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe contener al menos un número."
+        )
+
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>_\-+=/\\\[\]]", password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe contener al menos un carácter especial."
+        )

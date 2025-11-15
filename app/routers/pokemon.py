@@ -1,233 +1,238 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import Response
-from typing import Optional
+import os
+import tempfile
+import json
+from io import BytesIO
+import requests
+from PIL import Image, ImageDraw, ImageFont
+from reportlab.pdfgen import canvas
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from starlette.responses import FileResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from reportlab.lib.utils import ImageReader
 from app.services.pokeapi_service import pokeapi_service, logger
 from app.dependencies import get_current_active_user
 from app.models import User
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from fastapi.responses import HTMLResponse
 
 limiter = Limiter(key_func=get_remote_address)
-
 pokemon_router = APIRouter(prefix="/pokemon", tags=["Pokemon Search (Proxy)"])
 
 
-# GET /api/v1/pokemon/search (Busca o lista paginado)
-@pokemon_router.get("/{id_or_name}/card",
-                    response_class=HTMLResponse)
+# ---------------------------
+# Endpoint de detalles
+# ---------------------------
+@pokemon_router.get("/{id_or_name}")
+@limiter.limit("60/minute")
+async def get_pokemon_details(
+    id_or_name: str,
+    request: Request,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        result = await pokeapi_service.get_pokemon(id_or_name)
+        if result is None:
+            # Pokémon no encontrado
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pokémon no encontrado")
+        if isinstance(result, str):
+            result = json.loads(result)
+        return result
+    except HTTPException:
+        # Re-lanzamos excepciones HTTP (como el 404)
+        raise
+    except Exception as e:
+        logger.error(f"Error al obtener detalles del Pokémon: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno al obtener detalles: {e}"
+        )
+
+
+
+# ---------------------------
+# Endpoint de carta Pokémon (PDF o PNG)
+# ---------------------------
+@pokemon_router.get("/{id_or_name}/card")
+@limiter.limit("30/minute")
 async def generate_pokemon_card(
         id_or_name: str,
+        request: Request,
+        format: str = Query(..., description="Formato obligatorio: 'pdf' o 'png'"),
         current_user: User = Depends(get_current_active_user)
 ):
-    """
-    Genera y devuelve una ficha estilizada en formato HTML/CSS que simula una carta Pokémon.
-    """
+    tmp_path = None
     try:
-        # 1. Obtener detalles completos
+        # -------------------
+        # ✅ Validar formato primero
+        # -------------------
+        fmt = format.lower()
+        if fmt not in {"png", "pdf"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Formato no válido. Debe ser 'pdf' o 'png'."
+            )
+
+        # -------------------
+        # Obtener datos del Pokémon (solo si formato válido)
+        # -------------------
         pokemon_data = await pokeapi_service.get_pokemon(id_or_name)
+        if isinstance(pokemon_data, str):
+            pokemon_data = json.loads(pokemon_data)
 
-        # Extracción de datos clave
-        name = pokemon_data['name'].capitalize()
-        poke_id = pokemon_data['id']
-        sprite_url = pokemon_data['sprites']
+        pokemon_name = pokemon_data.get("name", "N/A").capitalize()
+        sprite_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{pokemon_data.get('id', 1)}.png"
 
-        # Obtenemos el tipo principal para el color de fondo
-        types = [t.capitalize() for t in pokemon_data['types']]
-        primary_type = types[0] if types else 'Normal'
+        stats_list = pokemon_data.get("stats", [])
+        stats = {
+            s.get("stat", {}).get("name", "N/A"): s.get("base_stat", "N/A")
+            for s in stats_list if isinstance(s, dict)
+        }
+        types_list = [
+            t.get("type", {}).get("name", "Normal").capitalize()
+            for t in pokemon_data.get("types", []) if isinstance(t, dict)
+        ]
+        primary_type = types_list[0] if types_list else "Normal"
 
-        # Mapeo de colores basado en tipos comunes de Pokémon
         type_colors = {
             'Fire': '#f08030', 'Water': '#6890f0', 'Grass': '#78c850', 'Electric': '#f8d030',
             'Ice': '#98d8d8', 'Fighting': '#c03028', 'Poison': '#a040a0', 'Ground': '#e0c068',
             'Flying': '#a890f0', 'Psychic': '#f85888', 'Bug': '#a8b820', 'Rock': '#b8a038',
             'Ghost': '#705898', 'Dragon': '#7038f8', 'Steel': '#b8b8d0', 'Fairy': '#ee99ac',
-            'Normal': '#a8a878', 'Dark': '#705848', 'N/A': '#68a090'
+            'Normal': '#a8a878', 'Dark': '#705848'
         }
-        card_color = type_colors.get(primary_type, '#a8a878')
+        bg_color = type_colors.get(primary_type, '#f0f0f0')
 
-        hp_stat = next((s['base_stat'] for s in pokemon_data['stats'] if s['stat']['name'] == 'hp'), 'N/A')
-        attack_stat = next((s['base_stat'] for s in pokemon_data['stats'] if s['stat']['name'] == 'attack'), 'N/A')
-        defense_stat = next((s['base_stat'] for s in pokemon_data['stats'] if s['stat']['name'] == 'defense'), 'N/A')
+        # -------------------
+        # Descargar sprite
+        # -------------------
+        sprite_img = None
+        response = requests.get(sprite_url)
+        if response.status_code == 200:
+            sprite_img = Image.open(BytesIO(response.content)).convert("RGBA")
 
-        # Simulación de descripción
-        description = f"Este es el Pokémon #{poke_id} de tipo {', '.join(types)}. Su ataque base es {attack_stat} y defensa {defense_stat}."
+        # -------------------
+        # Formato PNG
+        # -------------------
+        if fmt == "png":
+            card_width, card_height = 400, 600
+            card = Image.new("RGBA", (card_width, card_height), "#f0f0f0")
+            draw = ImageDraw.Draw(card)
 
-        # 2. Generación del HTML con CSS para simular la carta
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Pokémon Card: {name}</title>
-            <style>
-                body {{ background-color: #f0f0f0; display: flex; justify-content: center; padding-top: 50px; }}
-                .pokemon-card {{
-                    width: 350px;
-                    height: 500px;
-                    background: linear-gradient(to bottom, {card_color} 0%, #fff 40%, {card_color} 100%); /* Fondo degradado */
-                    border: 8px solid #333;
-                    border-radius: 20px;
-                    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
-                    font-family: 'Poppins', sans-serif; /* Usamos una fuente común */
-                    padding: 15px;
-                    position: relative;
-                    color: #222;
-                    display: flex;
-                    flex-direction: column;
-                }}
-                .card-frame {{
-                    flex-grow: 1;
-                    border: 2px solid #555;
-                    border-radius: 10px;
-                    background-color: #fff;
-                    padding: 10px;
-                    display: flex;
-                    flex-direction: column;
-                }}
-                .top-info {{ display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }}
-                .name {{ font-size: 1.8em; font-weight: 800; color: #111; }}
-                .hp {{ font-weight: bold; color: red; font-size: 1.5em; border: 3px solid #333; border-radius: 5px; padding: 2px 5px; background: white; }}
-                .image-box {{ 
-                    background-color: #f5f5f5; 
-                    border: 1px solid #ddd;
-                    border-radius: 8px; 
-                    padding: 5px; 
-                    text-align: center;
-                    min-height: 250px;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    margin-bottom: 10px;
-                }}
-                .sprite {{ max-width: 250%; height: auto; }}
+            # Marco exterior
+            border_color = "#333333"
+            draw.rectangle([0, 0, card_width - 1, card_height - 1], outline=border_color, width=8)
 
-                .stats-box {{
-                    background: {card_color};
-                    color: white;
-                    border-radius: 5px;
-                    padding: 10px;
-                    margin-top: 10px;
-                    font-size: 0.9em;
-                }}
-                .stats-box strong {{ font-weight: bold; color: black; }}
-            </style>
-        </head>
-        <body>
-            <div class="pokemon-card">
-                <div class="card-frame">
-                    <div class="top-info">
-                        <span class="name">{name}</span>
-                        <span class="hp">{hp_stat} HP</span>
-                    </div>
+            # Cuadro central blanco
+            draw.rectangle([10, 10, card_width - 10, card_height - 10], fill="white", outline=border_color, width=2)
 
-                    <div style="font-size: 1em; color: #555; margin-bottom: 5px;">
-                        No. {poke_id} | Tipo: 
-                        {''.join([f'<span class="type-badge" style="background-color: {card_color}; color: white;">{t}</span>' for t in types])}
-                    </div>
+            # Cuadro superior nombre + HP
+            draw.rectangle([20, 20, card_width - 20, 70], fill=bg_color)
+            try:
+                font_title = ImageFont.truetype("arialbd.ttf", 26)
+                font_stats = ImageFont.truetype("arial.ttf", 18)
+            except Exception:
+                font_title = ImageFont.load_default()
+                font_stats = ImageFont.load_default()
 
-                    <div class="image-box">
-                        <img src="{sprite_url}" alt="{name} sprite" class="sprite"/>
-                    </div>
+            draw.text((30, 25), pokemon_name, fill="white", font=font_title)
+            hp = stats.get("hp", "N/A")
+            draw.text((card_width - 100, 25), f"HP {hp}", fill="white", font=font_stats)
 
-                    <div class="description" style="font-size: 0.9em; border-top: 1px solid #ccc; padding-top: 8px;">
-                        {description}
-                    </div>
+            # Cuadro central para imagen
+            img_box_top, img_box_bottom = 90, 350
+            draw.rectangle([40, img_box_top, card_width - 40, img_box_bottom], outline=border_color, width=2)
 
-                    <div class="stats-box">
-                        <div style="font-weight: bold;">Estadísticas Base:</div>
-                        <p style="margin: 3px 0;">
-                            Ataque: {attack_stat} | Defensa: {defense_stat}
-                        </p>
-                    </div>
+            if sprite_img:
+                sprite_resized = sprite_img.resize((200, 200))
+                sprite_x = (card_width - sprite_resized.width) // 2
+                sprite_y = img_box_top + (img_box_bottom - img_box_top - sprite_resized.height) // 2
+                card.paste(sprite_resized, (sprite_x, sprite_y), sprite_resized.split()[3])
 
-                </div>
-                <small style="text-align: center; margin-top: 5px; font-size: 0.7em;">API UFV - Pokédex Personal</small>
-            </div>
-        </body>
-        </html>
-        """
+            # Cuadro inferior para stats y tipos
+            footer_top, footer_bottom = 360, card_height - 20
+            draw.rectangle([20, footer_top, card_width - 20, footer_bottom], outline=border_color, width=2)
 
-        # Retornamos el contenido HTML
-        return HTMLResponse(content=html_content)
+            # Tipos
+            y_types = footer_top + 10
+            for i, t in enumerate(types_list):
+                badge_color = type_colors.get(t, "#777")
+                draw.rectangle([30 + i * 90, y_types, 100 + i * 90, y_types + 30], fill=badge_color)
+                draw.text((35 + i * 90, y_types + 5), t, fill="white", font=font_stats)
 
-    except HTTPException as e:
-        raise e
+            # Stats
+            y_stats = y_types + 40
+            for i, (stat_name, value) in enumerate(stats.items()):
+                draw.text((30, y_stats + i * 25), f"{stat_name.capitalize()}: {value}", fill="black", font=font_stats)
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
+                tmp_path = tmp_file.name
+                card.save(tmp_file, "PNG")
+
+            return FileResponse(tmp_path, media_type="image/png", filename=f"{pokemon_name}_card.png")
+
+        # -------------------
+        # Formato PDF
+        # -------------------
+        elif fmt == "pdf":
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_path = tmp_file.name
+                c = canvas.Canvas(tmp_path, pagesize=(400, 600))
+
+                # Fondo blanco y borde exterior
+                c.setFillColor("white")
+                c.rect(0, 0, 400, 600, fill=1)
+                c.setStrokeColorRGB(0.2, 0.2, 0.2)
+                c.setLineWidth(3)
+                c.rect(5, 5, 390, 590, fill=0)
+
+                # Cuadro superior nombre + HP
+                c.setFillColor(bg_color)
+                c.rect(20, 530, 360, 50, fill=1)
+                c.setFillColor("white")
+                c.setFont("Helvetica-Bold", 24)
+                c.drawString(30, 545, pokemon_name)
+                hp = stats.get("hp", "N/A")
+                c.setFont("Helvetica", 16)
+                c.drawString(300, 545, f"HP {hp}")
+
+                # Cuadro central para imagen
+                c.setStrokeColorRGB(0, 0, 0)
+                c.rect(40, 280, 320, 240, fill=0)
+
+                if sprite_img:
+                    sprite_reader = ImageReader(sprite_img)
+                    c.drawImage(sprite_reader, int(100), int(300), width=int(200), height=int(200))
+
+                # Cuadro inferior stats y tipos
+                c.rect(20, 20, 360, 250, fill=0)
+
+                # Tipos
+                x, y = 30, 230
+                for t in types_list:
+                    badge_color = type_colors.get(t, "#777")
+                    c.setFillColor(badge_color)
+                    c.rect(x, y, 70, 20, fill=1)
+                    c.setFillColor("white")
+                    c.setFont("Helvetica", 12)
+                    c.drawString(x + 5, y + 4, t)
+                    x += 90
+
+                # Stats
+                y_stats = 200
+                c.setFillColor("black")
+                c.setFont("Helvetica", 12)
+                for stat_name, value in stats.items():
+                    c.drawString(30, y_stats, f"{stat_name.capitalize()}: {value}")
+                    y_stats -= 18
+
+                c.showPage()
+                c.save()
+
+            return FileResponse(tmp_path, media_type="application/pdf", filename=f"{pokemon_name}_card.pdf")
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error al generar la ficha HTML: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al generar la ficha HTML.")
-    """
-    Busca Pokémon en PokeAPI o lista con paginación.
-    Retorna lista simplificada: {id, name, sprite, types}
-    """
-    try:
-        if name:
-            result = await pokeapi_service.get_pokemon(name)
-
-            # Retorna lista simplificada
-            return [{
-                "id": result.get("id"),
-                "name": result.get("name"),
-                "sprite": result.get("sprites"),
-                "types": result.get("types")
-            }]
-        else:
-            result = await pokeapi_service.search_pokemon(limit, offset)
-            return result
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Error interno al buscar Pokémon: {e}")
-
-
-# GET /api/v1/pokemon/{id_or_name} (Detalles completos)
-@pokemon_router.get("/{id_or_name}")
-async def get_pokemon_details(
-        id_or_name: str,
-
-        current_user: User = Depends(get_current_active_user)
-):
-    """Obtiene detalles completos de un Pokémon (stats, abilities, types, sprites)."""
-    try:
-        # get_pokemon debe retornar stats, abilities, types, sprites
-        result = await pokeapi_service.get_pokemon(id_or_name)
-        return result
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Error interno al obtener detalles: {e}")
-
-
-
-@pokemon_router.get("/{id_or_name}/card",
-                    response_class=Response,
-                    responses={200: {"content": {"application/pdf": {}}}})
-async def generate_pokemon_card(
-        id_or_name: str,
-        current_user: User = Depends(get_current_active_user)  # Requiere autenticación
-):
-    """Genera y descarga una ficha en formato PDF o imagen."""
-    try:
-        # 1. Obtener detalles completos (stats, abilities, types, sprites)
-        pokemon_data = await pokeapi_service.get_pokemon(id_or_name)
-
-        # 2. Lógica de generación del PDF (Placeholder ya que la generación real requiere librerías)
-
-        pdf_content = f"--- FICHA POKÉMON: {pokemon_data['name'].upper()} ---\n"
-        pdf_content += f"ID: {pokemon_data['id']}\n"
-        pdf_content += f"Tipos: {', '.join(pokemon_data['types'])}\n"
-        pdf_content += f"HP: {next((s['base_stat'] for s in pokemon_data['stats'] if s['stat']['name'] == 'hp'), 'N/A')}\n"
-        pdf_content += f"Descripción de la especie (SIMULADA)\n"
-
-        # Retorna archivo descargable
-        return Response(content=pdf_content.encode('utf-8'),
-                        media_type="application/pdf",
-                        headers={"Content-Disposition": f"attachment; filename={id_or_name}_card.pdf"})
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al generar la ficha PDF.")
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        logger.error(f"Error al generar carta: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al generar la carta: {e}")

@@ -1,104 +1,54 @@
-# app/routers/auth.py - REGISTRO Y LOGIN (Parte 2.2) - VERSIÓN MEJORADA
-
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
-from app.models import User, UserCreate, UserRead
+from jose import JWTError, ExpiredSignatureError, jwt
+from app.models import User, UserCreate, UserRead, Token
 from app.database import get_session
-from app.auth import hash_password, verify_password, create_access_token  # Funciones de auth
-from app.utils import validate_password_policy  # Validación de contraseñas
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from app.utils import validate_password_policy
+from app.config import settings
 
-# Definición del Rate Limiter
-limiter = Limiter(key_func=get_remote_address)
-
+from app.auth import (
+    verify_password, get_password_hashed, create_access_token,
+    create_refresh_token, get_user_by_username, get_current_user,
+    limiter
+)
 auth_router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-# POST /api/v1/auth/register (Registro de usuarios)
-@limiter.limit("5/hour")  # Rate limit: 5 registros/hora por IP
-@auth_router.post(
-    "/register",
-    response_model=UserRead,
-    status_code=status.HTTP_201_CREATED,
-)
-async def register_user(
-    request: Request,
-    user_data: UserCreate,
-    session: Session = Depends(get_session)
-):
-    # 1. Validación de política de contraseña
-    try:
-        validate_password_policy(user_data.password)
-    except Exception as e:
-        # Asumimos que validate_password_policy lanza excepciones con mensaje descriptivo.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+@auth_router.get("/me")
+async def read_my_profile(current_user: User = Depends(get_current_user)):
+    return {"id": current_user.id, "username": current_user.username, "email": current_user.email}
 
-    # 2. Verificar duplicidad (username y email)
-    existing_user_by_username = session.exec(
-        select(User).where(User.username == user_data.username)
-    ).first()
-    if existing_user_by_username:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El nombre de usuario ya está registrado."
-        )
 
-    existing_user_by_email = session.exec(
-        select(User).where(User.email == user_data.email)
-    ).first()
-    if existing_user_by_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El email ya está registrado."
-        )
+@auth_router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@limiter.limit("5/hour")
+async def register_user(request: Request, user_data: UserCreate, session: Session = Depends(get_session)):
+    validate_password_policy(user_data.password)
 
-    # 3. Hashear y crear el usuario
-    try:
-        db_user = User(
-            username=user_data.username,
-            email=user_data.email,
-            # hash_password maneja internamente el esquema (bcrypt_sha256 / argon2, lo que tengas)
-            hashed_password=hash_password(user_data.password)
-        )
+    if get_user_by_username(session, user_data.username):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El nombre de usuario ya está registrado.")
+    if session.exec(select(User).where(User.email == user_data.email)).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El email ya está registrado.")
 
-        session.add(db_user)
-        session.commit()
-        session.refresh(db_user)
-
-    except IntegrityError as ie:
-        # Error de integridad (p.ej. constraint unique que se coló por race condition)
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se pudo crear el usuario (conflicto de datos)."
-        )
-    except SQLAlchemyError as sae:
-        # Otros errores de BD
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error interno al crear el usuario."
-        )
-
-    # 4. Retornar usuario (UserRead debería omitir hashed_password)
+    db_user = User(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=get_password_hashed(user_data.password)
+    )
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
     return db_user
 
 
-# POST /api/v1/auth/login (Login)
-@limiter.limit("10/minute")  # Rate limit: 10 intentos/minuto
-@auth_router.post("/login")
+@auth_router.post("/login", response_model=Token)
+@limiter.limit("10/minute")
 async def login_for_access_token(
-    request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends(),
-    session: Session = Depends(get_session)
+        request: Request,
+        form_data: OAuth2PasswordRequestForm = Depends(),
+        session: Session = Depends(get_session)
 ):
-    # Buscar usuario por username
-    user = session.exec(select(User).where(User.username == form_data.username)).first()
-
-    # Verificar credenciales
+    user = get_user_by_username(session, form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -106,8 +56,51 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Crear token (puedes ajustar payload según tus necesidades)
-    access_token = create_access_token(data={"sub": user.username, "user_id": user.id})
+    access_token = create_access_token(user.username, user.id)
+    refresh_token = create_refresh_token(user.username, user.id)
 
-    # Retornar JWT
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
+
+
+@auth_router.post("/refresh", response_model=Token)
+async def refresh_token(refresh_token: str):
+    """
+    Recibe un refresh token válido y devuelve un nuevo access token.
+    """
+    try:
+        payload = jwt.decode(refresh_token, settings.secret_key, algorithms=[settings.algorithm])
+        if payload.get("type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido: no es un refresh token"
+            )
+
+        username = payload.get("sub")
+        user_id = payload.get("user_id")
+
+        if username is None or user_id is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Datos del token inválidos")
+
+        # Generar un nuevo access token (sin crear un refresh nuevo)
+        new_access_token = create_access_token(username, user_id)
+
+        return {
+            "access_token": new_access_token,
+            "refresh_token": refresh_token,  # opcional, se mantiene el mismo
+            "token_type": "bearer",
+        }
+
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expirado, inicia sesión nuevamente."
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token inválido."
+        )
